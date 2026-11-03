@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 
 MAIN = "https://ringfantasybasketball.com"
 STATE_FILE = "seen.json"
+APP_VERSION = "4.0.3"     # cabecera X-App-Version que envia la web
 KEEP_IDS = 300            # ids recordados por grupo
 ALERT_EVERY = 6 * 3600    # segundos minimos entre avisos de error
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -141,6 +142,9 @@ def fetch_notices(s, host, group):
     params = {"search": "", "perPage": 25, "page": 1}
     headers = {"Accept": "application/json",
                "X-Requested-With": "XMLHttpRequest",
+               "X-App-Version": os.environ.get("RF_APP_VERSION") or APP_VERSION,
+               "X-Platform": "web",
+               "X-Timezone": "Europe/Madrid",
                "Referer": f"https://{host}/{group}/notices"}
     x = xsrf(s, host)
     if x:
@@ -201,6 +205,7 @@ def main():
         return
 
     ready, started, errors, sent = set(), 0, [], 0
+    last_err = ""
     for host, group in groups:
         label = f"{host.split('.')[0]} · grupo {group}"
         try:
@@ -211,6 +216,7 @@ def main():
         except Exception as e:
             print(f"Error en {label}: {e}")
             errors.append(label)
+            last_err = str(e)
             continue
 
         key = group_key(host, group)
@@ -240,7 +246,7 @@ def main():
         tg(f"✅ Monitor iniciado: {started} grupo(s) registrados. "
            "Desde ahora recibirás avisos de las noticias nuevas.")
     if errors:
-        alert(f"fallo la lectura de {len(errors)} grupo(s): " + ", ".join(errors[:5]))
+        alert(f"fallo la lectura de {len(errors)} grupo(s). Ultimo error: {last_err[:200]}")
 
     save_state(state)
     print(f"Grupos: {len(groups)} · avisos enviados: {sent} · errores: {len(errors)}")
