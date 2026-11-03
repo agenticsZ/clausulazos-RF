@@ -27,6 +27,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
 
 _bearer = {}  # host -> token (solo si la API lo exige)
+_diag = set()  # hosts ya diagnosticados
 
 
 # ---------- utilidades ----------
@@ -149,18 +150,28 @@ def fetch_notices(s, host, group):
 
     r = s.get(url, params=params, headers=headers, timeout=30)
 
-    if r.status_code in (401, 403, 419) and host not in _bearer:
-        # Plan B: quiza la API pide un token que entrega /api/token
-        t = s.get(f"https://{host}/api/token", headers=headers, timeout=30)
-        token = find_token(t.json()) if t.ok else None
-        print(f"[{host}] API {r.status_code}; /api/token -> HTTP {t.status_code}, "
-              f"token {'encontrado' if token else 'no encontrado'}")
+    if not r.ok and host not in _diag:
+        _diag.add(host)
+        print(f"[{host}] API HTTP {r.status_code}: {r.text[:300]!r}")
+        print(f"[{host}] cabeceras enviadas: {sorted(headers)}")
+        token, keys = None, None
+        try:
+            t = s.get(f"https://{host}/api/token", headers=headers, timeout=30)
+            body = t.json() if t.ok else None
+            keys = sorted(body) if isinstance(body, dict) else type(body).__name__
+            token = find_token(body) if body is not None else None
+            print(f"[{host}] /api/token HTTP {t.status_code}, claves: {keys}, "
+                  f"token: {'si' if token else 'no'}")
+        except Exception as e:
+            print(f"[{host}] /api/token fallo: {e}")
         if token:
             _bearer[host] = token
             headers["Authorization"] = f"Bearer {token}"
             r = s.get(url, params=params, headers=headers, timeout=30)
+            print(f"[{host}] reintento con Bearer: HTTP {r.status_code}: {r.text[:200]!r}")
 
-    r.raise_for_status()
+    if not r.ok:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:150]!r}")
     return r.json()["data"]["notices"]
 
 
