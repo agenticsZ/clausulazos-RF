@@ -22,6 +22,21 @@ from bs4 import BeautifulSoup
 MAIN = "https://ringfantasybasketball.com"
 STATE_FILE = "seen.json"
 APP_VERSION = "4.0.3"     # cabecera X-App-Version que envia la web
+# Nombre que se muestra en los avisos para cada grupo (id -> nombre)
+GROUP_NAMES = {
+    "8002": "MAXX 00",
+    "7362": "MAXX 01",
+    "456": "TAU",
+    "8183": "SHIFT",
+    "6840": "NBA",
+    "5436": "MAXX 02",
+    "7741": "MAXX 03",
+    "5448": "MAXX 04",
+    "6979": "MAXX 05",
+    "7162": "TXUS",
+    "6289": "RIVAL",
+    "7411": "EUROPA",
+}
 KEEP_IDS = 300            # ids recordados por grupo
 ALERT_EVERY = 6 * 3600    # segundos minimos entre avisos de error
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -207,7 +222,7 @@ def main():
     ready, started, errors, sent = set(), 0, [], 0
     last_err = ""
     for host, group in groups:
-        label = f"{host.split('.')[0]} · grupo {group}"
+        label = GROUP_NAMES.get(group, f"{host.split('.')[0]} · grupo {group}")
         try:
             if host not in ready:
                 open_host(s, host, group)
