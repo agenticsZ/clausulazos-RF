@@ -36,6 +36,19 @@ GROUP_NAMES = {
     "7162": "TXUS",
     "6289": "RIVAL",
     "7411": "EUROPA",
+    # ACB
+    "4053": "ACB 00",
+    "2142": "ACB 01",
+    "5034": "ACB 02",
+    "5068": "ACB 03",
+    "8798": "ACB 04",
+    "9723": "ACB 05",
+    "6279": "ACB 06",
+    "8284": "ACB 07",
+    "5783": "ACB 08",
+    "5298": "ACB 09",
+    "11862": "ACB BOOM",
+    "11990": "ACB SHOW",
 }
 MAX_PAGES = 8             # paginas de 25 noticias como maximo por grupo y ejecucion
 KEEP_IDS = 300            # ids recordados por grupo
