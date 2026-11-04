@@ -37,6 +37,7 @@ GROUP_NAMES = {
     "6289": "RIVAL",
     "7411": "EUROPA",
 }
+MAX_PAGES = 8             # paginas de 25 noticias como maximo por grupo y ejecucion
 KEEP_IDS = 300            # ids recordados por grupo
 ALERT_EVERY = 6 * 3600    # segundos minimos entre avisos de error
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -153,9 +154,9 @@ def find_token(obj):
     return None
 
 
-def fetch_notices(s, host, group):
+def fetch_notices(s, host, group, page=1):
     url = f"https://{host}/api/v1/notices/{group}"
-    params = {"search": "", "perPage": 25, "page": 1}
+    params = {"search": "", "perPage": 25, "page": page}
     headers = {"Accept": "application/json",
                "Accept-Language": "es-ES,es;q=0.9",
                "X-Requested-With": "XMLHttpRequest",
@@ -225,29 +226,41 @@ def main():
     last_err = ""
     for host, group in groups:
         label = GROUP_NAMES.get(group, f"{host.split('.')[0]} · grupo {group}")
+        key = group_key(host, group)
+        first_time = key not in state
+        seen = set(state.get(key, []))
+
         try:
             if host not in ready:
                 open_host(s, host, group)
                 ready.add(host)
-            notices = fetch_notices(s, host, group)
+            notices = []
+            for page in range(1, MAX_PAGES + 1):
+                batch = fetch_notices(s, host, group, page)
+                notices.extend(batch)
+                # Paramos si es la primera vez, si no hay mas noticias o si
+                # ya aparece alguna conocida (las noticias vienen de nuevas a viejas)
+                if first_time or not batch or any(n["id"] in seen for n in batch):
+                    break
+                time.sleep(0.5)
         except Exception as e:
             print(f"Error en {label}: {e}")
             errors.append(label)
             last_err = str(e)
             continue
 
-        key = group_key(host, group)
-        first_time = key not in state
-        seen = set(state.get(key, []))
         started += first_time
+        new_count = hits = 0
 
         for n in notices:
             nid = n["id"]
             if nid in seen:
                 continue
             seen.add(nid)
+            new_count += 1
             if first_time or not matches(n):
                 continue  # primera vez: solo se registra, sin avisar
+            hits += 1
             text = html_to_text(n.get("text", ""))
             ok = tg(f"🚨 {n.get('title', 'Noticia')} · {label}\n{text}\n"
                     f"🕒 {n.get('date', '')}\nhttps://{host}/{group}/notices")
@@ -255,6 +268,9 @@ def main():
                 sent += 1
             else:
                 seen.discard(nid)  # reintentar en la proxima ejecucion
+
+        print(f"{label}: {len(notices)} leidas, {new_count} nuevas, {hits} con clausula"
+              f"{' (primera vez)' if first_time else ''}")
 
         state[key] = sorted(seen, reverse=True)[:KEEP_IDS]
         time.sleep(1)
