@@ -60,7 +60,8 @@ def matches(notice):
     """Busca solo en titulo y texto. NO en el resto del JSON, porque
     player.protectedAlert menciona 'clausulazos' en casi todas las noticias."""
     haystack = f"{notice.get('title', '')} {html_to_text(notice.get('text', ''))}"
-    return "clausul" in norm(haystack)
+    h = norm(haystack)
+    return "clausul" in h or "clause" in h
 
 
 def parse_groups(raw):
@@ -156,6 +157,7 @@ def fetch_notices(s, host, group):
     url = f"https://{host}/api/v1/notices/{group}"
     params = {"search": "", "perPage": 25, "page": 1}
     headers = {"Accept": "application/json",
+               "Accept-Language": "es-ES,es;q=0.9",
                "X-Requested-With": "XMLHttpRequest",
                "X-App-Version": os.environ.get("RF_APP_VERSION") or APP_VERSION,
                "X-Platform": "web",
