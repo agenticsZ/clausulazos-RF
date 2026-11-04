@@ -32,7 +32,7 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           RF_USER: ${{ secrets.RF_USER }}
           RF_PASS: ${{ secrets.RF_PASS }}
-          RF_GROUPS: ${{ secrets.RF_GROUPS }}
+          RF_GROUPS: ${{ vars.RF_GROUPS }}
 
       - name: Guardar estado
         run: |
