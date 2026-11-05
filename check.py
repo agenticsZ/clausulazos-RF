@@ -79,11 +79,13 @@ def matches(notice):
 
 
 def parse_groups(raw):
+    """Extrae (host, id) de cualquier URL con forma https://host/<id>/...
+    sin importar separadores ni caracteres alrededor. Sin duplicados."""
     groups = []
-    for item in re.split(r"[\s,]+", raw.strip()):
-        m = re.match(r"https?://([^/]+)/(\d+)", item)
-        if m:
-            groups.append((m.group(1), m.group(2)))
+    for m in re.finditer(r"https?://([^/\s\"'<>()\[\]`,]+)/(\d+)", raw or ""):
+        g = (m.group(1), m.group(2))
+        if g not in groups:
+            groups.append(g)
     return groups
 
 
@@ -141,6 +143,24 @@ def open_host(s, host, group):
     r = s.get(f"https://{host}/{group}/notices", timeout=30)
     if urlparse(r.url).netloc != host:
         raise RuntimeError(f"No se pudo abrir sesion en {host}")
+    # La API exige ademas un token Bearer: se pide ya aqui para no recibir
+    # un 401 en la primera peticion de cada ejecucion.
+    try:
+        t = s.get(f"https://{host}/api/token",
+                  headers={"Accept": "application/json",
+                           "Accept-Language": "es-ES,es;q=0.9",
+                           "X-Requested-With": "XMLHttpRequest",
+                           "X-App-Version": os.environ.get("RF_APP_VERSION") or APP_VERSION,
+                           "X-Platform": "web",
+                           "X-Timezone": "Europe/Madrid"},
+                  timeout=30)
+        token = find_token(t.json()) if t.ok else None
+        if token:
+            _bearer[host] = token
+        else:
+            print(f"[{host}] /api/token HTTP {t.status_code}: sin token")
+    except Exception as e:
+        print(f"[{host}] /api/token fallo: {e}")
 
 
 def xsrf(s, host):
@@ -212,10 +232,15 @@ def fetch_notices(s, host, group, page=1):
 
 # ---------- principal ----------
 def main():
-    groups = parse_groups(os.environ["RF_GROUPS"])
+    raw_groups = os.environ.get("RF_GROUPS", "")
+    groups = parse_groups(raw_groups)
     if not groups:
-        print("RF_GROUPS vacio o con formato incorrecto")
+        print(f"RF_GROUPS vacio o con formato incorrecto "
+              f"(recibidos {len(raw_groups.strip())} caracteres, 0 URLs validas). "
+              "Comprueba que check.yml lee RF_GROUPS de donde lo hayas guardado "
+              "(secrets.RF_GROUPS o vars.RF_GROUPS) y que contiene las URLs.")
         sys.exit(1)
+    print(f"Grupos configurados: {len(groups)}")
 
     state = load_state()
     s = requests.Session()
@@ -275,7 +300,7 @@ def main():
                 continue  # primera vez: solo se registra, sin avisar
             hits += 1
             text = html_to_text(n.get("text", ""))
-            ok = tg(f"🚨 {n.get('title', 'Noticia')} · {label}\n{text}\n"
+            ok = tg(f"🚨 {n.get('title', 'Noticia')} 🚨 · {label}\n{text}\n"
                     f"🕒 {n.get('date', '')}\nhttps://{host}/{group}/notices")
             if ok:
                 sent += 1
