@@ -169,7 +169,7 @@ def find_token(obj):
 
 def fetch_notices(s, host, group, page=1):
     url = f"https://{host}/api/v1/notices/{group}"
-    params = {"search": "", "perPage": 25, "page": page}
+    params = {"search": "", "perPage": 50, "page": page}
     headers = {"Accept": "application/json",
                "Accept-Language": "es-ES,es;q=0.9",
                "X-Requested-With": "XMLHttpRequest",
