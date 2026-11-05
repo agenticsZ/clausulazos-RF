@@ -50,7 +50,7 @@ GROUP_NAMES = {
     "11862": "ACB BOOM",
     "11990": "ACB SHOW",
 }
-MAX_PAGES = 8             # paginas de 25 noticias como maximo por grupo y ejecucion
+MAX_PAGES = 10             # paginas de 25 noticias como maximo por grupo y ejecucion
 KEEP_IDS = 300            # ids recordados por grupo
 ALERT_EVERY = 6 * 3600    # segundos minimos entre avisos de error
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -189,7 +189,7 @@ def find_token(obj):
 
 def fetch_notices(s, host, group, page=1):
     url = f"https://{host}/api/v1/notices/{group}"
-    params = {"search": "", "perPage": 50, "page": page}
+    params = {"search": "", "perPage": 25, "page": page}
     headers = {"Accept": "application/json",
                "Accept-Language": "es-ES,es;q=0.9",
                "X-Requested-With": "XMLHttpRequest",
