@@ -9,6 +9,7 @@ RF_GROUPS: URLs de los grupos, una por linea o separadas por comas, p. ej.
 """
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -50,7 +51,13 @@ GROUP_NAMES = {
     "11862": "ACB BOOM",
     "11990": "ACB SHOW",
 }
-MAX_PAGES = 10             # paginas de 25 noticias como maximo por grupo y ejecucion
+MAX_PAGES = 10            # paginas de 25 noticias como maximo por grupo y ejecucion
+# Aviso de ofertas altas (importe en euros). Se puede cambiar con la variable RF_OFFER_MIN.
+OFFER_MIN = int(os.environ.get("RF_OFFER_MIN") or 1_200_000)
+# Ofertas por jugadores TUYOS: segun el % de tu clausula que representa la oferta,
+# se recomienda subirla. (desde, hasta, subida): "desde" incluido y "hasta" excluido.
+RAISE_BANDS = [(0.60, 0.80, 0.10), (0.80, 1.00, 0.15)]
+CLAUSE_STEP = 10_000  # la clausula recomendada se redondea hacia arriba a este multiplo
 KEEP_IDS = 300            # ids recordados por grupo
 ALERT_EVERY = 6 * 3600    # segundos minimos entre avisos de error
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -76,6 +83,71 @@ def matches(notice):
     haystack = f"{notice.get('title', '')} {html_to_text(notice.get('text', ''))}"
     h = norm(haystack)
     return "clausul" in h or "clause" in h
+
+
+OFFER_RE = re.compile(
+    r"^(?:El\s+)?(?P<by>.+?)\s+ha hecho una oferta al\s+(?P<to>.+?)\s+por\s+"
+    r"(?P<amount>\d[\d.]*)\s*€(?:\s*\+\s*\((?P<swap>[^)]*)\))?\s+por\s+(?P<player>.+)$"
+)
+
+
+def parse_offer(notice):
+    """Datos de la oferta (cualquier importe), o None si la noticia no es una oferta."""
+    if notice.get("type") != 10 and norm(notice.get("title", "")) != "oferta":
+        return None
+    m = OFFER_RE.match(html_to_text(notice.get("text", "")))
+    if not m:
+        return None
+    return {"by": m.group("by"), "to": m.group("to"),
+            "amount": int(m.group("amount").replace(".", "")),
+            "swap": m.group("swap"), "player": m.group("player")}
+
+
+def clausulazos_activos(team):
+    """True / False / None (no se sabe).
+    El juego lo indica en protectedAlert de cada jugador:
+      'Clausulazos activados...'   -> activos
+      'Clausulazos desactivados.'  -> desactivados
+      'Cuidado! ... protegido ...' -> proteccion de ESE jugador (no cuenta)"""
+    activos = desactivados = False
+    for pl in (team or {}).get("players", []):
+        alert = pl.get("protectedAlert") or {}
+        text = norm(alert.get("text", ""))
+        if "desactivad" in text:
+            desactivados = True
+        elif "clausulazos activados" in text:
+            activos = True
+    if activos:
+        return True
+    if desactivados:
+        return False
+    return None
+
+
+def my_player(team, offer):
+    """(es_a_mi_equipo, jugador). El jugador es el dict de tu plantilla o None."""
+    if not team or norm(offer["to"]) != norm(team.get("name", "")):
+        return False, None
+    for pl in team.get("players", []):
+        if norm(pl.get("fullName", "")) == norm(offer["player"]):
+            return True, pl
+    return True, None
+
+
+def raise_advice(clause, amount):
+    """(porcentaje de la clausula, consejo). Consejo vacio si la oferta aun esta lejos."""
+    ratio = amount / clause
+    if ratio >= 1:
+        return ratio, "🚨 La oferta ya iguala o supera la cláusula"
+    for low, high, up in RAISE_BANDS:
+        if low <= ratio < high:
+            new = math.ceil(clause * (1 + up) / CLAUSE_STEP) * CLAUSE_STEP
+            return ratio, f"📈 Sube la cláusula un {up:.0%}: de {euros(clause)} a {euros(new)}"
+    return ratio, ""
+
+
+def euros(n):
+    return f"{n:,}".replace(",", ".") + " €"
 
 
 def parse_groups(raw):
@@ -187,9 +259,7 @@ def find_token(obj):
     return None
 
 
-def fetch_notices(s, host, group, page=1):
-    url = f"https://{host}/api/v1/notices/{group}"
-    params = {"search": "", "perPage": 25, "page": page}
+def api_headers(s, host, group):
     headers = {"Accept": "application/json",
                "Accept-Language": "es-ES,es;q=0.9",
                "X-Requested-With": "XMLHttpRequest",
@@ -202,6 +272,23 @@ def fetch_notices(s, host, group, page=1):
         headers["X-XSRF-TOKEN"] = x
     if host in _bearer:
         headers["Authorization"] = f"Bearer {_bearer[host]}"
+    return headers
+
+
+def fetch_team(s, host, group):
+    """Tu equipo en ese grupo: nombre y plantilla con sus clausulas.
+    El numero del grupo en la URL es el id de tu propio equipo."""
+    r = s.get(f"https://{host}/api/v1/teams/{group}/{group}",
+              headers=api_headers(s, host, group), timeout=30)
+    if not r.ok:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:150]!r}")
+    return r.json()["data"]["team"]
+
+
+def fetch_notices(s, host, group, page=1):
+    url = f"https://{host}/api/v1/notices/{group}"
+    params = {"search": "", "perPage": 25, "page": page}
+    headers = api_headers(s, host, group)
 
     r = s.get(url, params=params, headers=headers, timeout=30)
 
@@ -261,6 +348,7 @@ def main():
         return
 
     ready, started, errors, sent = set(), 0, [], 0
+    teams = {}
     last_err = ""
     for host, group in groups:
         label = GROUP_NAMES.get(group, f"{host.split('.')[0]} · grupo {group}")
@@ -288,26 +376,72 @@ def main():
             continue
 
         started += first_time
-        new_count = hits = 0
+        new_count = hits = big = muted = 0
 
-        for n in notices:
+        for n in sorted(notices, key=lambda x: x["id"]):  # de antigua a reciente
             nid = n["id"]
             if nid in seen:
                 continue
             seen.add(nid)
             new_count += 1
-            if first_time or not matches(n):
+            if first_time:
                 continue  # primera vez: solo se registra, sin avisar
-            hits += 1
-            text = html_to_text(n.get("text", ""))
-            ok = tg(f"🚨 {n.get('title', 'Noticia')} 🚨 · {label}\n{text}\n"
-                    f"🕒 {n.get('date', '')}\nhttps://{host}/{group}/notices")
+            link = f"https://{host}/{group}/notices"
+            if matches(n):
+                hits += 1
+                text = html_to_text(n.get("text", ""))
+                msg = (f"🚨 {n.get('title', 'Noticia')} · {label}\n{text}\n"
+                       f"🕒 {n.get('date', '')}\n{link}")
+            else:
+                offer = parse_offer(n)
+                if not offer:
+                    continue
+                key_t = (host, group)
+                if key_t not in teams:
+                    try:
+                        teams[key_t] = fetch_team(s, host, group)
+                    except Exception as e:
+                        print(f"No se pudo leer tu equipo en {label}: {e}")
+                        teams[key_t] = None
+                team = teams[key_t]
+
+                es_alta = offer["amount"] >= OFFER_MIN                 # regla 1
+                a_mi_equipo, jugador = my_player(team, offer)
+                clausula = (jugador or {}).get("clause")
+                ratio, consejo = (raise_advice(clausula, offer["amount"])
+                                  if clausula else (None, ""))
+                cerca = ratio is not None and ratio >= RAISE_BANDS[0][0]  # regla 2
+                if not (es_alta or cerca):
+                    continue
+
+                estado = clausulazos_activos(team)
+                if estado is False:
+                    muted += 1
+                    continue  # clausulazos desactivados en este grupo: no se avisa
+                big += 1
+
+                extra = f" (+ {offer['swap']})" if offer["swap"] else ""
+                lines = [f"{'💰 Oferta alta' if es_alta else '🎯 Oferta por un jugador tuyo'} · {label}",
+                         f"{offer['by']} → {offer['to']}: {euros(offer['amount'])}{extra} "
+                         f"por {offer['player']}",
+                         "✅ Clausulazos activados" if estado
+                         else "❔ No pude comprobar si los clausulazos están activos"]
+                if a_mi_equipo and es_alta:
+                    lines.append("🎯 Es un jugador de tu equipo")
+                if clausula:
+                    lines.append(f"Cláusula: {euros(clausula)} · la oferta es el {ratio:.0%}")
+                if consejo:
+                    lines.append(consejo)
+                lines += [f"🕒 {n.get('date', '')}", link]
+                msg = "\n".join(lines)
+            ok = tg(msg)
             if ok:
                 sent += 1
             else:
                 seen.discard(nid)  # reintentar en la proxima ejecucion
 
-        print(f"{label}: {len(notices)} leidas, {new_count} nuevas, {hits} con clausula"
+        print(f"{label}: {len(notices)} leidas, {new_count} nuevas, {hits} con clausula, {big} avisos de oferta"
+              f"{f' (+{muted} sin avisar: clausulazos desactivados)' if muted else ''}"
               f"{' (primera vez)' if first_time else ''}")
 
         state[key] = sorted(seen, reverse=True)[:KEEP_IDS]
