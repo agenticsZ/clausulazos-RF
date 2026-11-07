@@ -57,9 +57,9 @@ OFFER_MIN = int(os.environ.get("RF_OFFER_MIN") or 1_200_000)
 # Ofertas por jugadores TUYOS: segun el % de tu clausula que representa la oferta,
 # se recomienda subirla. (desde, hasta, subida): "desde" incluido y "hasta" excluido.
 RAISE_BANDS = [(0.60, 0.80, 0.10), (0.80, 1.00, 0.15)]
-CLAUSE_STEP = 1_000     # la clausula recomendada se redondea hacia arriba a este multiplo
-KEEP_IDS = 300          # ids recordados por grupo
-ALERT_EVERY = 2 * 3600  # segundos minimos entre avisos de error
+CLAUSE_STEP = 10_000  # la clausula recomendada se redondea hacia arriba a este multiplo
+KEEP_IDS = 300            # ids recordados por grupo
+ALERT_EVERY = 6 * 3600    # segundos minimos entre avisos de error
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
 
